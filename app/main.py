@@ -278,3 +278,12 @@ async def get_statistics():
     stats = get_stats()
     return stats
 
+
+@app.get("/metrics")
+async def get_metrics():
+    """
+    Expose Prometheus-style metrics.
+    """
+    content = export_metrics()
+    return Response(content=content, media_type="text/plain")
+
