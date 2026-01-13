@@ -11,6 +11,8 @@ from .models import init_db, check_db
 from .config import config
 from .storage import insert_message, fetch_messages, get_stats
 from .logging_utils import log_request
+from .metrics import increment_http_request, increment_webhook_result, export_metrics
+from fastapi.responses import Response
 
 
 app = FastAPI(title="Lyftr AI Backend")
@@ -53,6 +55,9 @@ async def logging_middleware(request: Request, call_next):
         latency_ms=latency_ms,
         extra=extra if extra else None
     )
+    
+    # Increment metrics
+    increment_http_request(request.url.path, response.status_code)
     
     return response
 
@@ -166,6 +171,7 @@ async def webhook(
     # Verify signature
     if not x_signature:
         request.state.result = "invalid_signature"
+        increment_webhook_result("invalid_signature")
         return JSONResponse(
             status_code=401,
             content={"detail": "invalid signature"}
@@ -173,6 +179,7 @@ async def webhook(
     
     if not verify_signature(raw_body, x_signature):
         request.state.result = "invalid_signature"
+        increment_webhook_result("invalid_signature")
         return JSONResponse(
             status_code=401,
             content={"detail": "invalid signature"}
@@ -183,6 +190,7 @@ async def webhook(
         payload = WebhookPayload.model_validate_json(raw_body)
     except ValidationError:
         request.state.result = "validation_error"
+        increment_webhook_result("validation_error")
         raise
     
     # Set message_id on request.state
@@ -204,6 +212,9 @@ async def webhook(
     # Set logging fields on request.state
     request.state.dup = (result == "duplicate")
     request.state.result = result
+    
+    # Increment metrics
+    increment_webhook_result(result)
     
     # Return success for both "created" and "duplicate"
     return {"status": "ok"}
