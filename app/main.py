@@ -1,10 +1,68 @@
-from fastapi import FastAPI
+import hmac
+import hashlib
+from datetime import datetime
+from typing import Optional
+from fastapi import FastAPI, Request, Header
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
 from .models import init_db, check_db
 from .config import config
+from .storage import insert_message
 
 
 app = FastAPI(title="Lyftr AI Backend")
+
+
+# Pydantic model for webhook payload validation
+class WebhookPayload(BaseModel):
+    message_id: str = Field(..., min_length=1)
+    from_: str = Field(..., alias="from")
+    to: str = Field(..., min_length=1)
+    ts: str = Field(..., min_length=1)
+    text: Optional[str] = Field(None, max_length=4096)
+    
+    @field_validator("from_")
+    @classmethod
+    def validate_from(cls, v: str) -> str:
+        if not v.startswith("+"):
+            raise ValueError("must start with +")
+        if not v[1:].isdigit():
+            raise ValueError("must contain only digits after +")
+        return v
+    
+    @field_validator("to")
+    @classmethod
+    def validate_to(cls, v: str) -> str:
+        if not v.startswith("+"):
+            raise ValueError("must start with +")
+        if not v[1:].isdigit():
+            raise ValueError("must contain only digits after +")
+        return v
+    
+    @field_validator("ts")
+    @classmethod
+    def validate_ts(cls, v: str) -> str:
+        if not v.endswith("Z"):
+            raise ValueError("must be ISO-8601 UTC ending with Z")
+        return v
+
+
+def verify_signature(body: bytes, signature: str) -> bool:
+    """
+    Verify HMAC-SHA256 signature using constant-time comparison.
+    
+    Args:
+        body: Raw request body bytes
+        signature: Hex-encoded signature from X-Signature header
+    
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    secret = config.WEBHOOK_SECRET.encode('utf-8')
+    expected_signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
+    
+    # Constant-time comparison to prevent timing attacks
+    return hmac.compare_digest(expected_signature, signature)
 
 
 @app.on_event("startup")
@@ -19,7 +77,10 @@ async def startup_event():
 
 @app.get("/health/live")
 async def health_live():
-    """Liveness check - always returns 200."""
+    """
+    Liveness check - always returns 200.
+    Indicates the application process is running.
+    """
     return {"status": "live"}
 
 
@@ -27,8 +88,8 @@ async def health_live():
 async def health_ready():
     """
     Readiness check - returns 200 only if:
-    - Database is reachable and schema exists
-    - WEBHOOK_SECRET is present and non-empty
+    - Database is reachable and schema exists (check_db)
+    - WEBHOOK_SECRET is present and non-empty (config.is_webhook_secret_valid)
     """
     db_ready = check_db()
     webhook_secret_valid = config.is_webhook_secret_valid()
@@ -40,3 +101,52 @@ async def health_ready():
             status_code=503,
             content={"status": "not_ready"}
         )
+
+
+@app.post("/webhook")
+async def webhook(
+    request: Request,
+    x_signature: Optional[str] = Header(None, alias="X-Signature")
+):
+    """
+    Webhook endpoint with HMAC signature verification and idempotent message storage.
+    
+    Returns:
+        200 {"status": "ok"} for valid requests (both new and duplicate messages)
+        401 {"detail": "invalid signature"} for missing or invalid signatures
+        422 for invalid payload (handled by FastAPI/Pydantic)
+    """
+    # Read raw body for HMAC verification
+    raw_body = await request.body()
+    
+    # Verify signature
+    if not x_signature:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "invalid signature"}
+        )
+    
+    if not verify_signature(raw_body, x_signature):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "invalid signature"}
+        )
+    
+    # Parse and validate payload
+    payload = WebhookPayload.model_validate_json(raw_body)
+    
+    # Get current timestamp for created_at
+    created_at = datetime.utcnow().isoformat() + "Z"
+    
+    # Insert message (idempotent)
+    result = insert_message(
+        message_id=payload.message_id,
+        from_msisdn=payload.from_,
+        to_msisdn=payload.to,
+        ts=payload.ts,
+        text=payload.text,
+        created_at=created_at
+    )
+    
+    # Return success for both "created" and "duplicate"
+    return {"status": "ok"}
