@@ -100,3 +100,41 @@ def fetch_messages(
     messages = [dict(row) for row in rows]
     
     return messages, total_count
+
+
+def get_stats() -> dict:
+    """
+    Compute aggregate message-level statistics from the database.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Query 1: Total messages, first and last timestamps
+    cursor.execute("SELECT COUNT(*) as total, MIN(ts) as first_ts, MAX(ts) as last_ts FROM messages")
+    row = cursor.fetchone()
+    total_messages = row["total"]
+    first_message_ts = row["first_ts"]
+    last_message_ts = row["last_ts"]
+    
+    # Query 2: Number of distinct senders
+    cursor.execute("SELECT COUNT(DISTINCT from_msisdn) as senders_count FROM messages")
+    senders_count = cursor.fetchone()["senders_count"]
+    
+    # Query 3: Top 10 senders by message count
+    cursor.execute("""
+        SELECT from_msisdn as sender, COUNT(*) as count 
+        FROM messages 
+        GROUP BY from_msisdn 
+        ORDER BY count DESC 
+        LIMIT 10
+    """)
+    sender_rows = cursor.fetchall()
+    messages_per_sender = [{"from": r["sender"], "count": r["count"]} for r in sender_rows]
+    
+    return {
+        "total_messages": total_messages,
+        "senders_count": senders_count,
+        "messages_per_sender": messages_per_sender,
+        "first_message_ts": first_message_ts,
+        "last_message_ts": last_message_ts
+    }

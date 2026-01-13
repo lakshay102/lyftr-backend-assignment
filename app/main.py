@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from .models import init_db, check_db
 from .config import config
-from .storage import insert_message, fetch_messages
+from .storage import insert_message, fetch_messages, get_stats
 
 
 app = FastAPI(title="Lyftr AI Backend")
@@ -200,4 +200,13 @@ async def get_messages(
         "limit": limit,
         "offset": offset
     }
+
+
+@app.get("/stats")
+async def get_statistics():
+    """
+    Retrieve aggregate message-level statistics.
+    """
+    stats = get_stats()
+    return stats
 
