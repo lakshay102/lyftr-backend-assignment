@@ -1,16 +1,60 @@
 import hmac
 import hashlib
+import uuid
+import time
 from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, Request, Header, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from .models import init_db, check_db
 from .config import config
 from .storage import insert_message, fetch_messages, get_stats
+from .logging_utils import log_request
 
 
 app = FastAPI(title="Lyftr AI Backend")
+
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """
+    Middleware to log all requests with structured JSON output.
+    Generates request_id, measures latency, and logs one line per request.
+    """
+    # Generate unique request ID
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    # Record start time
+    start_time = time.time()
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Compute latency
+    latency_ms = (time.time() - start_time) * 1000
+    
+    # Collect extra fields from request.state (if any)
+    extra = {}
+    if hasattr(request.state, "message_id"):
+        extra["message_id"] = request.state.message_id
+    if hasattr(request.state, "dup"):
+        extra["dup"] = request.state.dup
+    if hasattr(request.state, "result"):
+        extra["result"] = request.state.result
+    
+    # Log the request
+    log_request(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        status=response.status_code,
+        latency_ms=latency_ms,
+        extra=extra if extra else None
+    )
+    
+    return response
 
 
 # Pydantic model for webhook payload validation
@@ -121,19 +165,28 @@ async def webhook(
     
     # Verify signature
     if not x_signature:
+        request.state.result = "invalid_signature"
         return JSONResponse(
             status_code=401,
             content={"detail": "invalid signature"}
         )
     
     if not verify_signature(raw_body, x_signature):
+        request.state.result = "invalid_signature"
         return JSONResponse(
             status_code=401,
             content={"detail": "invalid signature"}
         )
     
     # Parse and validate payload
-    payload = WebhookPayload.model_validate_json(raw_body)
+    try:
+        payload = WebhookPayload.model_validate_json(raw_body)
+    except ValidationError:
+        request.state.result = "validation_error"
+        raise
+    
+    # Set message_id on request.state
+    request.state.message_id = payload.message_id
     
     # Get current timestamp for created_at
     created_at = datetime.utcnow().isoformat() + "Z"
@@ -147,6 +200,10 @@ async def webhook(
         text=payload.text,
         created_at=created_at
     )
+    
+    # Set logging fields on request.state
+    request.state.dup = (result == "duplicate")
+    request.state.result = result
     
     # Return success for both "created" and "duplicate"
     return {"status": "ok"}
