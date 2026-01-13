@@ -2,12 +2,12 @@ import hmac
 import hashlib
 from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from .models import init_db, check_db
 from .config import config
-from .storage import insert_message
+from .storage import insert_message, fetch_messages
 
 
 app = FastAPI(title="Lyftr AI Backend")
@@ -150,3 +150,54 @@ async def webhook(
     
     # Return success for both "created" and "duplicate"
     return {"status": "ok"}
+
+
+@app.get("/messages")
+async def get_messages(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    from_: Optional[str] = Query(default=None, alias="from"),
+    since: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None)
+):
+    """
+    Retrieve messages with optional filtering and pagination.
+    
+    Query parameters:
+        limit: Maximum number of messages to return (1-100, default 50)
+        offset: Number of messages to skip (default 0)
+        from: Filter by sender phone number (optional)
+        since: Filter by timestamp - messages with ts >= since (optional, ISO-8601)
+        q: Search query for text field (optional)
+    
+    Returns:
+        JSON with data (list of messages), total count, limit, and offset
+    """
+    # Fetch messages from storage
+    messages, total = fetch_messages(
+        limit=limit,
+        offset=offset,
+        from_msisdn=from_,
+        since_ts=since,
+        q=q
+    )
+    
+    # Transform messages to exclude created_at field
+    data = [
+        {
+            "message_id": msg["message_id"],
+            "from": msg["from_msisdn"],
+            "to": msg["to_msisdn"],
+            "ts": msg["ts"],
+            "text": msg["text"]
+        }
+        for msg in messages
+    ]
+    
+    return {
+        "data": data,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
