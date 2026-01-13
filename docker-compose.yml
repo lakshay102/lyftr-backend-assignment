@@ -7,5 +7,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - LOG_LEVEL=${LOG_LEVEL}
     volumes:
       - ./data:/data
