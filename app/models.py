@@ -28,21 +28,25 @@ def _ensure_db_directory(db_path: str):
         Path(db_dir).mkdir(parents=True, exist_ok=True)
 
 
-def _get_connection() -> sqlite3.Connection:
-    """Get or create a database connection."""
+def get_connection() -> sqlite3.Connection:
+    """
+    Get or create a database connection.
+    Connection is configured with Row factory for dict-like access.
+    """
     global _db_connection
     
     if _db_connection is None:
         db_path = _get_db_path()
         _ensure_db_directory(db_path)
         _db_connection = sqlite3.connect(db_path, check_same_thread=False)
+        _db_connection.row_factory = sqlite3.Row
     
     return _db_connection
 
 
 def init_db():
     """Initialize the database schema."""
-    conn = _get_connection()
+    conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -65,7 +69,7 @@ def check_db() -> bool:
     Returns True if successful, False otherwise.
     """
     try:
-        conn = _get_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         # Check if messages table exists
