@@ -51,7 +51,7 @@ def init_db():
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
-            message_id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
             from_msisdn TEXT NOT NULL,
             to_msisdn TEXT NOT NULL,
             ts TEXT NOT NULL,

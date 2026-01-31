@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from typing import Optional
-
+import logging
 
 def log_request(
     request_id: str,
@@ -35,6 +35,10 @@ def log_request(
     # Merge extra fields if provided
     if extra:
         log_entry.update(extra)
+
+    
+    logger = logging.getLogger(__name__)
+    logger.error("error message")
     
     # Output as a single JSON line
     print(json.dumps(log_entry), flush=True)

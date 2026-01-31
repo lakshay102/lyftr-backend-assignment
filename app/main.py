@@ -117,6 +117,7 @@ def verify_signature(body: bytes, signature: str) -> bool:
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup."""
+    start = datetime.utcnow().isoformat() + "Z"
     try:
         init_db()
     except Exception:
@@ -201,7 +202,7 @@ async def webhook(
     
     # Insert message (idempotent)
     result = insert_message(
-        message_id=payload.message_id,
+        # message_id=payload.message_id,
         from_msisdn=payload.from_,
         to_msisdn=payload.to,
         ts=payload.ts,

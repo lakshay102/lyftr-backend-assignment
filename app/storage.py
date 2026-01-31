@@ -1,10 +1,11 @@
 from typing import Optional, Literal
 import sqlite3
+import uuid
 from .models import get_connection
 
 
 def insert_message(
-    message_id: str,
+    # message_id: str,
     from_msisdn: str,
     to_msisdn: str,
     ts: str,
@@ -20,6 +21,13 @@ def insert_message(
     """
     conn = get_connection()
     cursor = conn.cursor()
+
+    body = f"{from_msisdn}{to_msisdn}{ts}{text}"
+
+    message_id = uuid.uuid4().hex
+
+    secret = config.MSG_SECRET.encode('utf-8')
+    expected_signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
     
     try:
         cursor.execute(
@@ -27,7 +35,7 @@ def insert_message(
             INSERT INTO messages (message_id, from_msisdn, to_msisdn, ts, text, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (message_id, from_msisdn, to_msisdn, ts, text, created_at)
+            (message_idfrom_msisdn, to_msisdn, ts, text, created_at)
         )
         conn.commit()
         return "created"
@@ -136,5 +144,6 @@ def get_stats() -> dict:
         "senders_count": senders_count,
         "messages_per_sender": messages_per_sender,
         "first_message_ts": first_message_ts,
-        "last_message_ts": last_message_ts
+        "last_message_ts": last_message_ts,
+        "total_uptime": datetime.now()
     }
